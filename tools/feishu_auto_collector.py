@@ -101,7 +101,6 @@ def setup_config() -> None:
     print("  消息类（应用权限，用于群聊采集）：")
     print("    im:message:readonly          读取消息")
     print("    im:chat:readonly             读取群聊信息")
-    print("    im:chat.members:readonly     读取群成员")
     print()
     print("  消息类（用户权限，用于私聊采集）：")
     print("    im:message                   以用户身份读取/发送消息")
@@ -110,6 +109,7 @@ def setup_config() -> None:
     print("  用户类：")
     print("    contact:user.base:readonly       读取用户基本信息")
     print("    contact:department.base:readonly  遍历部门查找用户（按姓名搜索必需）")
+    print("    contact:contact.base:readonly     按姓名搜索必需；通讯录权限范围需设为「全部成员」")
     print()
     print("  文档类：")
     print("    docs:doc:readonly            读取文档")
@@ -335,7 +335,7 @@ def _find_user_by_contact(name: str, config: dict) -> Optional[dict]:
 
 
 def _find_user_by_department(name: str, config: dict) -> Optional[dict]:
-    """遍历部门查找用户（使用 tenant_access_token，需要 contact:department.base:readonly）"""
+    """遍历部门查找用户（使用 tenant_access_token，需要 contact:contact.base:readonly + 全部成员通讯录范围）"""
     print(f"  通过部门遍历查找 {name} ...", file=sys.stderr)
 
     # 递归获取所有部门 ID
@@ -351,7 +351,7 @@ def _find_user_by_department(name: str, config: dict) -> Optional[dict]:
         if data.get("code") != 0:
             if parent_id == "0":
                 print(f"  部门遍历失败（code={data.get('code')}）：{data.get('msg')}", file=sys.stderr)
-                print("  请确认已开通 contact:department.base:readonly 权限", file=sys.stderr)
+                print("  请确认已开通 contact:contact.base:readonly 权限，且通讯录权限范围为「全部成员」", file=sys.stderr)
                 return None
             continue
 
@@ -438,7 +438,7 @@ def find_user(name: str, config: dict) -> Optional[dict]:
 
     策略：
       1. 如果输入是邮箱/手机号 → 直接用 batch_get_id（最快）
-      2. 否则 → 遍历部门查找（需要 contact:department.base:readonly）
+      2. 否则 → 遍历部门查找（需要 contact:contact.base:readonly + 全部成员通讯录范围）
       3. 如果部门遍历也失败 → 提示用户改用邮箱/手机号
     """
     print(f"  搜索用户：{name} ...", file=sys.stderr)
@@ -456,7 +456,7 @@ def find_user(name: str, config: dict) -> Optional[dict]:
     # 都失败
     print(f"\n  ❌ 未能找到用户 {name}", file=sys.stderr)
     print("  建议：", file=sys.stderr)
-    print("    1. 确认已开通 contact:department.base:readonly 权限", file=sys.stderr)
+    print("    1. 确认已开通 contact:contact.base:readonly 权限，且通讯录权限范围为「全部成员」", file=sys.stderr)
     print("    2. 改用邮箱搜索：--name user@company.com", file=sys.stderr)
     print("    3. 改用手机号搜索：--name +8613800138000", file=sys.stderr)
     return None

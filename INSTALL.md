@@ -302,7 +302,7 @@ python3 tools/feishu_auto_collector.py --refresh   # token 过期后刷新
 python3 tools/feishu_auto_collector.py --check     # 查看凭证状态
 ```
 
-国际版 Lark（`larksuite.com`）租户：在 `open.larksuite.com` 创建应用，并在运行前设置 `export FEISHU_DOMAIN=lark`（默认 `feishu`，即 `open.feishu.cn`）。目前仅 `feishu_auto_collector.py` 支持该变量。
+国际版 Lark（`larksuite.com`）租户：在 `open.larksuite.com` 创建应用，并在运行前设置 `export FEISHU_DOMAIN=lark`（默认 `feishu`，即 `open.feishu.cn`）。目前仅 `feishu_auto_collector.py` 支持该变量。按姓名查找用户需要开通 `contact:contact.base:readonly`，并把通讯录权限范围设为「全部成员」。
 
 **钉钉自动采集初始化**：
 ```bash

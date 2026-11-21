@@ -123,7 +123,9 @@ The Lark-compatible collector uses the China-region `open.feishu.cn` endpoints
 by default. For an international `larksuite.com` tenant, create the app on
 `open.larksuite.com` and set `FEISHU_DOMAIN=lark` before running
 `feishu_auto_collector.py` (the browser and MCP collectors still use
-`feishu.cn`). Never commit App secrets, OAuth tokens, or API keys to the
+`feishu.cn`). Looking a user up by name needs the
+`contact:contact.base:readonly` scope with the contacts data range set to All
+members. Never commit App secrets, OAuth tokens, or API keys to the
 repository.
 
 Collector credentials are read from environment variables first
