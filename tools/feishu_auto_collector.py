@@ -357,7 +357,8 @@ def _find_user_by_department(name: str, config: dict) -> Optional[dict]:
 
         children = data.get("data", {}).get("items", [])
         for child in children:
-            child_id = child.get("department_id", "")
+            # find_by_department defaults to open_department_id; department_id is a different id
+            child_id = child.get("open_department_id", "")
             if child_id:
                 dept_ids.append(child_id)
                 queue.append(child_id)
