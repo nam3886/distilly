@@ -503,6 +503,24 @@ def get_chats_with_user(user_open_id: str, config: dict) -> list:
     return result
 
 
+def parse_message_content(content_raw: str) -> str:
+    """Extract plain text from a message body: text ({"text": ...}) or post (rich text)."""
+    try:
+        content_obj = json.loads(content_raw)
+    except Exception:
+        return content_raw.strip()
+    if not isinstance(content_obj, dict):
+        return str(content_obj).strip()
+    if "text" in content_obj:
+        return content_obj["text"].strip()
+    text_parts = []
+    for line in content_obj.get("content", []):
+        for seg in line:
+            if seg.get("tag") in ("text", "a"):
+                text_parts.append(seg.get("text", ""))
+    return " ".join(text_parts).strip()
+
+
 def fetch_messages_from_chat(
     chat_id: str,
     user_open_id: str,
@@ -537,24 +555,7 @@ def fetch_messages_from_chat(
             if sender_id != user_open_id:
                 continue
 
-            # 解析消息内容
-            content_raw = item.get("body", {}).get("content", "")
-            try:
-                content_obj = json.loads(content_raw)
-                # 富文本消息
-                if isinstance(content_obj, dict):
-                    text_parts = []
-                    for line in content_obj.get("content", []):
-                        for seg in line:
-                            if seg.get("tag") in ("text", "a"):
-                                text_parts.append(seg.get("text", ""))
-                    content = " ".join(text_parts)
-                else:
-                    content = str(content_obj)
-            except Exception:
-                content = content_raw
-
-            content = content.strip()
+            content = parse_message_content(item.get("body", {}).get("content", ""))
             if not content or content in ("[图片]", "[文件]", "[表情]", "[语音]"):
                 continue
 
@@ -607,28 +608,7 @@ def fetch_p2p_messages(
             sender = item.get("sender", {})
             sender_id = sender.get("id") or sender.get("open_id", "")
 
-            # 解析消息内容
-            content_raw = item.get("body", {}).get("content", "")
-            try:
-                content_obj = json.loads(content_raw)
-                if isinstance(content_obj, dict):
-                    # 纯文本消息
-                    if "text" in content_obj:
-                        content = content_obj["text"]
-                    else:
-                        # 富文本消息
-                        text_parts = []
-                        for line in content_obj.get("content", []):
-                            for seg in line:
-                                if seg.get("tag") in ("text", "a"):
-                                    text_parts.append(seg.get("text", ""))
-                        content = " ".join(text_parts)
-                else:
-                    content = str(content_obj)
-            except Exception:
-                content = content_raw
-
-            content = content.strip()
+            content = parse_message_content(item.get("body", {}).get("content", ""))
             if not content or content in ("[图片]", "[文件]", "[表情]", "[语音]"):
                 continue
 
