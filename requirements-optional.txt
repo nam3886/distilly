@@ -16,3 +16,6 @@ openpyxl>=3.1.0
 
 # Store collector secrets in the OS keychain instead of ~/.distilly/*.json
 keyring>=24.0.0
+
+# PDF attachments in the Feishu/Lark collector
+pypdf>=4.0.0

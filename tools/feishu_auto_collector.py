@@ -536,8 +536,9 @@ def fetch_messages_from_chat(
     user_open_id: str,
     limit: int,
     config: dict,
+    files: Optional[list] = None,
 ) -> list:
-    """从指定群聊拉取目标用户的消息"""
+    """从指定群聊拉取目标用户的消息；传入 files 时顺便收集目标用户发送的文件消息"""
     messages = []
     page_token = None
 
@@ -563,6 +564,18 @@ def fetch_messages_from_chat(
             sender = item.get("sender", {})
             sender_id = sender.get("id") or sender.get("open_id", "")
             if sender_id != user_open_id:
+                continue
+
+            if item.get("msg_type") == "file" and files is not None:
+                try:
+                    body = json.loads(item.get("body", {}).get("content", ""))
+                    files.append({
+                        "message_id": item.get("message_id", ""),
+                        "file_key": body["file_key"],
+                        "file_name": body.get("file_name", ""),
+                    })
+                except (ValueError, KeyError, TypeError):
+                    pass
                 continue
 
             content = parse_message_content(item.get("body", {}).get("content", ""))
@@ -648,6 +661,7 @@ def collect_messages(
     user: dict,
     msg_limit: int,
     config: dict,
+    files: Optional[list] = None,
 ) -> str:
     """采集目标用户的所有消息记录（群聊 + 私聊）"""
     user_open_id = user.get("open_id") or user.get("user_id", "")
@@ -683,7 +697,7 @@ def collect_messages(
                 chat_name = chat.get("name", chat_id)
                 print(f"  拉取「{chat_name}」消息 ...", file=sys.stderr)
 
-                msgs = fetch_messages_from_chat(chat_id, user_open_id, per_chat_limit, config)
+                msgs = fetch_messages_from_chat(chat_id, user_open_id, per_chat_limit, config, files)
                 for m in msgs:
                     m["chat"] = chat_name
                 all_messages.extend(msgs)
@@ -738,6 +752,120 @@ def collect_messages(
             who = f"[{name}]" if m.get("is_target") else "[对方]"
             lines.append(f"[{m.get('time', '')}] {who} {m['content']}")
 
+    return "\n".join(lines)
+
+
+# ─── 附件采集 ─────────────────────────────────────────────────────────────────
+
+FILE_EXTS = (".docx", ".xlsx", ".pdf", ".txt", ".md", ".csv")
+MAX_FILE_BYTES = 30 * 1024 * 1024
+MAX_FILE_CHARS = 20000
+
+
+def _docx_text(data: bytes) -> str:
+    import io
+    import zipfile
+    import xml.etree.ElementTree as ET
+
+    w = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    root = ET.fromstring(zipfile.ZipFile(io.BytesIO(data)).read("word/document.xml"))
+    paras = ("".join(t.text or "" for t in p.iter(f"{w}t")) for p in root.iter(f"{w}p"))
+    return "\n".join(p for p in paras if p.strip())
+
+
+def _xlsx_text(data: bytes) -> str:
+    import io
+    import zipfile
+    import xml.etree.ElementTree as ET
+
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    z = zipfile.ZipFile(io.BytesIO(data))
+    shared = []
+    if "xl/sharedStrings.xml" in z.namelist():
+        root = ET.fromstring(z.read("xl/sharedStrings.xml"))
+        shared = ["".join(t.text or "" for t in si.iter(f"{ns}t")) for si in root.iter(f"{ns}si")]
+    lines = []
+    sheets = sorted(n for n in z.namelist() if re.match(r"xl/worksheets/sheet\d+\.xml$", n))
+    for sheet in sheets:
+        lines.append(f"## {sheet.rsplit('/', 1)[-1]}")
+        for row in ET.fromstring(z.read(sheet)).iter(f"{ns}row"):
+            cells = []
+            for c in row.iter(f"{ns}c"):
+                if c.get("t") == "inlineStr":
+                    cells.append("".join(t.text or "" for t in c.iter(f"{ns}t")))
+                    continue
+                v = c.find(f"{ns}v")
+                val = v.text if v is not None and v.text else ""
+                if c.get("t") == "s" and val.isdigit() and int(val) < len(shared):
+                    val = shared[int(val)]
+                cells.append(val)
+            if any(cells):
+                lines.append("\t".join(cells))
+    return "\n".join(lines)
+
+
+def _pdf_text(data: bytes) -> str:
+    import io
+
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        raise RuntimeError("需要 pypdf（pip3 install pypdf）") from None
+    return "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(data)).pages)
+
+
+def extract_file_text(file_name: str, data: bytes) -> str:
+    """从附件内容中提取纯文本；不支持的格式抛 ValueError"""
+    ext = Path(file_name).suffix.lower()
+    if ext == ".docx":
+        return _docx_text(data)
+    if ext == ".xlsx":
+        return _xlsx_text(data)
+    if ext == ".pdf":
+        return _pdf_text(data)
+    if ext in (".txt", ".md", ".csv"):
+        return data.decode("utf-8", errors="replace")
+    raise ValueError(f"不支持的格式：{ext or '无扩展名'}")
+
+
+def download_message_file(message_id: str, file_key: str, config: dict) -> bytes:
+    """下载消息里的文件（需要 im:message:readonly；仅限 bot 所在会话）"""
+    resp = requests.get(
+        f"{BASE_URL}/im/v1/messages/{message_id}/resources/{file_key}",
+        params={"type": "file"},
+        headers={"Authorization": f"Bearer {get_tenant_token(config)}"},
+        timeout=60,
+        stream=True,
+    )
+    if resp.status_code != 200 or "application/json" in resp.headers.get("Content-Type", ""):
+        raise RuntimeError(f"下载失败（HTTP {resp.status_code}）：{resp.text[:200]}")
+    data = resp.raw.read(MAX_FILE_BYTES + 1, decode_content=True)
+    if len(data) > MAX_FILE_BYTES:
+        raise RuntimeError(f"文件超过 {MAX_FILE_BYTES // 1024 // 1024} MB，跳过")
+    return data
+
+
+def collect_files(files: list, file_limit: int, config: dict) -> str:
+    """下载目标用户发送的附件并提取文本"""
+    seen = set()
+    unique = [f for f in files if not (f["file_key"] in seen or seen.add(f["file_key"]))]
+    readable = [f for f in unique if Path(f["file_name"]).suffix.lower() in FILE_EXTS][:file_limit]
+    skipped = [f["file_name"] for f in unique if f not in readable]
+
+    lines = ["# 附件内容（自动采集）", f"共 {len(unique)} 个文件，读取 {len(readable)} 个", ""]
+    for f in readable:
+        name = f["file_name"]
+        print(f"  读取 {name} ...", file=sys.stderr)
+        try:
+            text = extract_file_text(name, download_message_file(f["message_id"], f["file_key"], config)).strip()
+        except Exception as e:
+            lines += [f"## {name}", f"（读取失败：{e}）", ""]
+            continue
+        if len(text) > MAX_FILE_CHARS:
+            text = text[:MAX_FILE_CHARS] + f"\n\n（已截断，原文 {len(text)} 字符）"
+        lines += [f"## {name}", "", text or "（无文本内容）", ""]
+    if skipped:
+        lines += ["## 未读取的文件（格式不支持或超出数量上限）", ""] + [f"- {n}" for n in skipped]
     return "\n".join(lines)
 
 
@@ -908,12 +1036,23 @@ def collect_bitable(app_token: str, config: dict) -> str:
 
 # ─── 主流程 ───────────────────────────────────────────────────────────────────
 
+def _write_files(files: list, file_limit: int, config: dict, output_dir: Path) -> dict:
+    if not files or file_limit <= 0:
+        return {}
+    print(f"\n📎 采集附件（上限 {file_limit} 个）...", file=sys.stderr)
+    path = output_dir / "files.txt"
+    path.write_text(collect_files(files, file_limit, config), encoding="utf-8")
+    print(f"  ✅ 附件内容 → {path}", file=sys.stderr)
+    return {"files": str(path)}
+
+
 def collect_all(
     name: str,
     output_dir: Path,
     msg_limit: int,
     doc_limit: int,
     config: dict,
+    file_limit: int = 20,
 ) -> dict:
     """采集某同事的所有可用数据，输出到 output_dir"""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -929,14 +1068,17 @@ def collect_all(
 
     # Step 2: 采集消息记录
     print(f"\n📨 采集消息记录（上限 {msg_limit} 条）...", file=sys.stderr)
+    files: list = []
     try:
-        msg_content = collect_messages(user, msg_limit, config)
+        msg_content = collect_messages(user, msg_limit, config, files)
         msg_path = output_dir / "messages.txt"
         msg_path.write_text(msg_content, encoding="utf-8")
         results["messages"] = str(msg_path)
         print(f"  ✅ 消息记录 → {msg_path}", file=sys.stderr)
     except Exception as e:
         print(f"  ⚠️  消息采集失败：{e}", file=sys.stderr)
+
+    results.update(_write_files(files, file_limit, config, output_dir))
 
     # Step 3: 采集文档
     print(f"\n📄 采集文档（上限 {doc_limit} 篇）...", file=sys.stderr)
@@ -973,6 +1115,7 @@ def main() -> None:
     parser.add_argument("--output-dir", default=None, help="输出目录（默认 ./knowledge/{name}）")
     parser.add_argument("--msg-limit", type=int, default=1000, help="最多采集消息条数（默认 1000）")
     parser.add_argument("--doc-limit", type=int, default=20, help="最多采集文档篇数（默认 20）")
+    parser.add_argument("--file-limit", type=int, default=20, help="最多读取群聊附件个数（docx/xlsx/pdf/txt/md/csv，默认 20，0 为不读取）")
     parser.add_argument("--check", action="store_true", help="检查凭证是否已配置（只显示来源，不输出值）")
     parser.add_argument("--login", action="store_true", help="在终端完成 OAuth 授权，获取 user_access_token")
     parser.add_argument("--refresh", action="store_true", help="用已保存的 refresh_token 刷新 user_access_token")
@@ -1032,10 +1175,12 @@ def main() -> None:
 
         # 只采集消息
         print(f"📨 采集消息记录（上限 {args.msg_limit} 条）...", file=sys.stderr)
-        msg_content = collect_messages(user, args.msg_limit, config)
+        files: list = []
+        msg_content = collect_messages(user, args.msg_limit, config, files)
         msg_path = output_dir / "messages.txt"
         msg_path.write_text(msg_content, encoding="utf-8")
         print(f"  ✅ 消息记录 → {msg_path}", file=sys.stderr)
+        _write_files(files, args.file_limit, config, output_dir)
         return
 
     collect_all(
@@ -1044,6 +1189,7 @@ def main() -> None:
         msg_limit=args.msg_limit,
         doc_limit=args.doc_limit,
         config=config,
+        file_limit=args.file_limit,
     )
 
 
