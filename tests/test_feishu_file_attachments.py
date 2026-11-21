@@ -73,7 +73,7 @@ class FileMessageTests(unittest.TestCase):
         self.assertEqual(msgs, [])
         self.assertEqual(files, [{"message_id": "om_k1", "file_key": "k1", "file_name": "spec.docx"}])
 
-    def test_collect_files_dedupes_skips_and_truncates(self) -> None:
+    def test_collect_files_dedupes_and_skips(self) -> None:
         files = [
             {"message_id": "m1", "file_key": "k1", "file_name": "spec.docx"},
             {"message_id": "m2", "file_key": "k1", "file_name": "spec.docx"},
@@ -87,11 +87,10 @@ class FileMessageTests(unittest.TestCase):
                 raise RuntimeError("boom")
             return blobs[file_key]
 
-        with patch.object(fac, "download_message_file", side_effect=fake_download) as dl, \
-                patch.object(fac, "MAX_FILE_CHARS", 10):
+        with patch.object(fac, "download_message_file", side_effect=fake_download) as dl:
             out = fac.collect_files(files, 20, {})
         self.assertEqual(dl.call_count, 2)
-        self.assertIn("## spec.docx\n\nxxxxxxxxxx\n\n（已截断，原文 50 字符）", out)
+        self.assertIn("## spec.docx\n\n" + "x" * 50 + "\n", out)
         self.assertIn("## notes.txt\n（读取失败：boom）", out)
         self.assertIn("- app.zip", out)
         self.assertIn("共 3 个文件，读取 2 个", out)

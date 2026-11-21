@@ -759,7 +759,6 @@ def collect_messages(
 
 FILE_EXTS = (".docx", ".xlsx", ".pdf", ".txt", ".md", ".csv")
 MAX_FILE_BYTES = 30 * 1024 * 1024
-MAX_FILE_CHARS = 20000
 
 
 def _docx_text(data: bytes) -> str:
@@ -861,8 +860,6 @@ def collect_files(files: list, file_limit: int, config: dict) -> str:
         except Exception as e:
             lines += [f"## {name}", f"（读取失败：{e}）", ""]
             continue
-        if len(text) > MAX_FILE_CHARS:
-            text = text[:MAX_FILE_CHARS] + f"\n\n（已截断，原文 {len(text)} 字符）"
         lines += [f"## {name}", "", text or "（无文本内容）", ""]
     if skipped:
         lines += ["## 未读取的文件（格式不支持或超出数量上限）", ""] + [f"- {n}" for n in skipped]
