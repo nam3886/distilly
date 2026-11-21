@@ -18,6 +18,8 @@
 凭证读取优先级：环境变量 > 系统钥匙串（pip3 install keyring）> ~/.distilly/feishu_config.json
   FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_USER_ACCESS_TOKEN / FEISHU_REFRESH_TOKEN
 
+国际版 Lark（larksuite.com）租户：设置 FEISHU_DOMAIN=lark（默认 feishu）
+
 私聊采集（需额外步骤）：
   1. 飞书应用开通用户权限：im:message, im:chat
   2. 在你自己的终端运行 OAuth 登录（打印授权链接，隐藏输入回调地址里的 code）：
@@ -46,6 +48,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -66,7 +69,13 @@ import credentials  # noqa: E402
 
 CONFIG_PATH = Path.home() / ".distilly" / "feishu_config.json"
 LEGACY_CONFIG_PATH = Path.home() / ".colleague-skill" / "feishu_config.json"
-BASE_URL = "https://open.feishu.cn/open-apis"
+# Feishu (China) and Lark (international) are separate tenants with identical API paths.
+OPEN_HOSTS = {"feishu": "https://open.feishu.cn", "lark": "https://open.larksuite.com"}
+_domain = os.environ.get("FEISHU_DOMAIN", "feishu").strip().lower() or "feishu"
+if _domain not in OPEN_HOSTS:
+    sys.exit(f"错误：FEISHU_DOMAIN 只能是 feishu 或 lark，收到：{_domain}")
+OPEN_HOST = OPEN_HOSTS[_domain]
+BASE_URL = f"{OPEN_HOST}/open-apis"
 
 
 # ─── 配置 ────────────────────────────────────────────────────────────────────
@@ -87,7 +96,7 @@ def save_config(config: dict) -> None:
 
 def setup_config() -> None:
     print("=== 飞书自动采集配置 ===\n")
-    print("请前往 https://open.feishu.cn 创建企业自建应用，开通以下权限：")
+    print(f"请前往 {OPEN_HOST} 创建企业自建应用，开通以下权限：")
     print()
     print("  消息类（应用权限，用于群聊采集）：")
     print("    im:message:readonly          读取消息")
@@ -113,7 +122,7 @@ def setup_config() -> None:
     print("  ─── 私聊采集说明 ───")
     print("  私聊消息必须通过 user_access_token 获取（应用身份无权访问私聊）。")
     print("  获取方式：OAuth 授权，授权链接格式：")
-    print("    https://open.feishu.cn/open-apis/authen/v1/authorize?app_id={APP_ID}&redirect_uri={REDIRECT}&scope=im:message%20im:chat")
+    print(f"    {BASE_URL}/authen/v1/authorize?app_id={{APP_ID}}&redirect_uri={{REDIRECT}}&scope=im:message%20im:chat")
     print("  配置完 App ID / Secret 后，在本终端运行 --login 完成授权。")
     print()
 

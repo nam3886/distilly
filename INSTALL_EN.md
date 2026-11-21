@@ -119,10 +119,12 @@ python3 tools/dingtalk_auto_collector.py --setup
 python3 tools/slack_auto_collector.py --setup
 ```
 
-The current Lark-compatible collector uses the China-region
-`open.feishu.cn` / `feishu.cn` endpoints. International `larksuite.com` tenant
-routing is not implemented yet. Never commit App secrets, OAuth tokens, or API
-keys to the repository.
+The Lark-compatible collector uses the China-region `open.feishu.cn` endpoints
+by default. For an international `larksuite.com` tenant, create the app on
+`open.larksuite.com` and set `FEISHU_DOMAIN=lark` before running
+`feishu_auto_collector.py` (the browser and MCP collectors still use
+`feishu.cn`). Never commit App secrets, OAuth tokens, or API keys to the
+repository.
 
 Collector credentials are read from environment variables first
 (`FEISHU_APP_ID`, `FEISHU_APP_SECRET`, `FEISHU_USER_ACCESS_TOKEN`,
